@@ -401,6 +401,57 @@ function cfmod_get_known_rootdomains(?array $moduleSettings = null): array {
     return $cache;
 }
 
+
+if (!function_exists('cfmod_rootdomain_maintenance_supported')) {
+    function cfmod_rootdomain_maintenance_supported(): bool
+    {
+        static $supported = null;
+        if ($supported !== null) {
+            return $supported;
+        }
+        try {
+            $supported = Capsule::schema()->hasColumn('mod_cloudflare_rootdomains', 'maintenance_mode');
+        } catch (\Throwable $e) {
+            $supported = false;
+        }
+        return $supported;
+    }
+}
+
+if (!function_exists('cfmod_is_rootdomain_in_maintenance')) {
+    function cfmod_is_rootdomain_in_maintenance(?string $rootdomain, bool $resetCache = false): bool
+    {
+        static $cache = [];
+        if ($resetCache) {
+            $cache = [];
+        }
+        $normalized = strtolower(trim((string) $rootdomain));
+        if ($normalized === '' || !cfmod_rootdomain_maintenance_supported()) {
+            return false;
+        }
+        if (array_key_exists($normalized, $cache)) {
+            return $cache[$normalized];
+        }
+        try {
+            $flag = Capsule::table('mod_cloudflare_rootdomains')
+                ->whereRaw('LOWER(domain) = ?', [$normalized])
+                ->value('maintenance_mode');
+            return $cache[$normalized] = ((int) $flag === 1);
+        } catch (\Throwable $e) {
+            return $cache[$normalized] = false;
+        }
+    }
+}
+
+if (!function_exists('cfmod_reset_rootdomain_maintenance_cache')) {
+    function cfmod_reset_rootdomain_maintenance_cache(): void
+    {
+        if (function_exists('cfmod_is_rootdomain_in_maintenance')) {
+            cfmod_is_rootdomain_in_maintenance('', true);
+        }
+    }
+}
+
 function cfmod_next_rootdomain_display_order(): int {
     static $nextOrder = null;
     if ($nextOrder === null) {

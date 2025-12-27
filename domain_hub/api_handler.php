@@ -78,6 +78,15 @@ function api_setting_enabled($value): bool {
     }
     return in_array($normalized, ['1', 'on', 'yes', 'true', 'enabled'], true);
 }
+function api_rootdomain_in_maintenance(?string $rootdomain): bool {
+    if (!function_exists('cfmod_rootdomain_maintenance_supported') || !cfmod_rootdomain_maintenance_supported()) {
+        return false;
+    }
+    return function_exists('cfmod_is_rootdomain_in_maintenance')
+        ? cfmod_is_rootdomain_in_maintenance($rootdomain)
+        : false;
+}
+
 
 function api_handle_subdomain_register(array $data, $keyRow, array $settings): array {
     $code = 200;

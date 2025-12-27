@@ -137,6 +137,7 @@ class CfClientViewModelBuilder
         }
 
         $globals['roots'] = self::loadRootDomains();
+        $globals['rootMaintenanceMap'] = self::loadRootMaintenanceMap();
         $globals['rootLimitMap'] = self::loadRootLimitMap();
 
         $globals['userid'] = $userId;
@@ -295,9 +296,14 @@ class CfClientViewModelBuilder
     {
         $roots = [];
         try {
-            $rows = Capsule::table('mod_cloudflare_rootdomains')
-                ->where('status', 'active')
-                ->orderBy('display_order', 'asc')
+            $query = Capsule::table('mod_cloudflare_rootdomains')
+                ->where('status', 'active');
+            if (function_exists('cfmod_rootdomain_maintenance_supported') && cfmod_rootdomain_maintenance_supported()) {
+                $query->where(function ($builder) {
+                    $builder->whereNull('maintenance_mode')->orWhere('maintenance_mode', 0);
+                });
+            }
+            $rows = $query->orderBy('display_order', 'asc')
                 ->orderBy('id', 'asc')
                 ->get();
             foreach ($rows as $row) {
@@ -313,6 +319,29 @@ class CfClientViewModelBuilder
         return array_values(array_unique(array_filter($roots, static function ($d) {
             return $d !== '';
         })));
+    }
+
+    private static function loadRootMaintenanceMap(): array
+    {
+        if (!function_exists('cfmod_rootdomain_maintenance_supported') || !cfmod_rootdomain_maintenance_supported()) {
+            return [];
+        }
+        $map = [];
+        try {
+            $rows = Capsule::table('mod_cloudflare_rootdomains')
+                ->select('domain', 'maintenance_mode')
+                ->get();
+            foreach ($rows as $row) {
+                $domain = strtolower(trim((string)($row->domain ?? '')));
+                if ($domain === '') {
+                    continue;
+                }
+                $map[$domain] = (int)($row->maintenance_mode ?? 0) === 1;
+            }
+        } catch (\Throwable $e) {
+            return [];
+        }
+        return $map;
     }
 
     private static function loadRootLimitMap(): array

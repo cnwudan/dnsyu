@@ -14,6 +14,7 @@ require_once __DIR__ . '/DnsUnlockService.php';
 
 class CfClientActionService
 {
+    private static $runtimeRootMaintenanceMap = [];
     public static function process(array $globals): array
     {
         if (strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -35,6 +36,7 @@ class CfClientActionService
         }
 
         extract($globals, EXTR_SKIP);
+        self::setRuntimeRootMaintenanceMap($rootMaintenanceMap ?? []);
 
         $module_settings = $module_settings ?? [];
         $enableDnsUnlockFeature = cfmod_setting_enabled($module_settings['enable_dns_unlock'] ?? '0');
@@ -478,6 +480,16 @@ if($_POST['action'] == "register") {
             if ($vpnCheckPassed) {
             $subprefix = trim($_POST['subdomain']);
             $rootdomain = trim($_POST['rootdomain']);
+            if (self::isRootDomainUnderMaintenance($rootdomain)) {
+                $msg = self::maintenanceBlockedMessage($rootdomain);
+                $msg_type = 'warning';
+                $registerError = $msg;
+                return [
+                    'msg' => $msg,
+                    'msg_type' => $msg_type,
+                    'registerError' => $registerError,
+                ];
+            }
             $subprefixLen = strlen($subprefix);
 
             if ($subprefix === '' || $rootdomain === '') {
@@ -852,8 +864,7 @@ if($_POST['action'] == "renew" && isset($_POST['subdomain_id'])) {
 
 // 处理删除请求（禁用：用户不能删除自己的域名）
 if($_POST['action'] == "delete" && isset($_POST['subdomain_id'])) {
-    $subdomain_id = intval($_POST['subdomain_id']);
-    $msg = self::actionText('delete.not_supported', '成功注册的免费域名暂不支持删除。如需处理，请提交工单获取支持。');
+        $msg = self::actionText('delete.not_supported', '成功注册的免费域名暂不支持删除。如需处理，请提交工单获取支持。');
     $msg_type = "warning";
     if (function_exists('cloudflare_subdomain_log')) {
         cloudflare_subdomain_log('client_attempt_delete_subdomain', ['subdomain_id' => $subdomain_id], $userid, $subdomain_id);
@@ -871,6 +882,14 @@ if($_POST['action'] == "create_dns" && isset($_POST['subdomain_id'])) {
             $record_type = 'A';
         }
         $record_type_upper = strtoupper($record_type);
+        $subdomain_id = intval($_POST['subdomain_id']);
+        if (self::handleMaintenanceBlockForSubdomain($subdomain_id, $userid, $msg, $msg_type, $registerError)) {
+            return [
+                'msg' => $msg,
+                'msg_type' => $msg_type,
+                'registerError' => $registerError,
+            ];
+        }
         if ($enableDnsUnlockFeature && $record_type_upper === 'NS' && !CfDnsUnlockService::userHasUnlocked($userid ?? 0)) {
             $msg = self::actionText('dns.unlock.required', '请先完成 DNS 解锁后再设置 NS 记录。');
             $msg_type = 'warning';
@@ -916,8 +935,7 @@ if($_POST['action'] == "create_dns" && isset($_POST['subdomain_id'])) {
             ];
         }
 
-        $subdomain_id = intval($_POST['subdomain_id']);
-        $record_content = trim($_POST['record_content']);
+                $record_content = trim($_POST['record_content']);
         $record_ttl = cfmod_normalize_ttl($_POST['record_ttl'] ?? 600);
         $record_priority_raw = $_POST['record_priority'] ?? null;
         $record_priority = is_numeric($record_priority_raw) ? intval($record_priority_raw) : 0;
@@ -1215,6 +1233,14 @@ if($_POST['action'] == "create_dns" && isset($_POST['subdomain_id'])) {
 
 // 处理域名自助删除
 if($_POST['action'] == 'delete_subdomain' && isset($_POST['subdomain_id'])) {
+    $subdomainId = intval($_POST['subdomain_id']);
+    if (self::handleMaintenanceBlockForSubdomain($subdomainId, $userid, $msg, $msg_type, $registerError)) {
+        return [
+            'msg' => $msg,
+            'msg_type' => $msg_type,
+            'registerError' => $registerError,
+        ];
+    }
     if (empty($clientDeleteEnabled)) {
         $msg = self::actionText('delete.not_supported', '注册的域名暂不支持自助删除，如需协助请提交工单。');
         $msg_type = 'warning';
@@ -1222,8 +1248,7 @@ if($_POST['action'] == 'delete_subdomain' && isset($_POST['subdomain_id'])) {
         $msg = self::actionText('delete.banned', '您的账号已被封禁或停用，暂无法提交删除申请。') . ($banReasonText ? (' ' . $banReasonText) : '');
         $msg_type = 'danger';
     } else {
-        $subdomainId = intval($_POST['subdomain_id']);
-        if ($subdomainId <= 0) {
+                if ($subdomainId <= 0) {
             $msg = self::actionText('delete.invalid_subdomain', '未找到该域名，请刷新后重试。');
             $msg_type = 'warning';
         } else {
@@ -1309,6 +1334,13 @@ if($_POST['action'] == "update_dns" && isset($_POST['subdomain_id'])) {
             $record_type = 'A';
         }
         $record_type_upper = strtoupper($record_type);
+                if (self::handleMaintenanceBlockForSubdomain($subdomain_id, $userid, $msg, $msg_type, $registerError)) {
+            return [
+                'msg' => $msg,
+                'msg_type' => $msg_type,
+                'registerError' => $registerError,
+            ];
+        }
         if ($enableDnsUnlockFeature && $record_type_upper === 'NS' && !CfDnsUnlockService::userHasUnlocked($userid ?? 0)) {
             $msg = self::actionText('dns.unlock.required', '请先完成 DNS 解锁后再设置 NS 记录。');
             $msg_type = 'warning';
@@ -1584,6 +1616,14 @@ if($_POST['action'] == "update_dns" && isset($_POST['subdomain_id'])) {
 
 // 处理CDN控制请求（同步记录表）
 if($_POST['action'] == "toggle_cdn" && isset($_POST['subdomain_id'])) {
+    $subdomain_id = intval($_POST['subdomain_id']);
+    if (self::handleMaintenanceBlockForSubdomain($subdomain_id, $userid, $msg, $msg_type)) {
+        return [
+            'msg' => $msg,
+            'msg_type' => $msg_type,
+            'registerError' => $registerError,
+        ];
+    }
     if (!$disableDnsWrite && !$isUserBannedOrInactive && self::shouldUseAsyncDns('toggle_cdn', $module_settings, $isAsyncReplay)) {
         $jobId = self::enqueueAsyncDnsJob(intval($userid ?? 0), 'toggle_cdn');
         $msg = self::formatAsyncQueuedMessage($jobId);
@@ -1597,8 +1637,7 @@ if($_POST['action'] == "toggle_cdn" && isset($_POST['subdomain_id'])) {
             $msg_type = 'danger';
         }
 
-        $subdomain_id = intval($_POST['subdomain_id']);
-        $proxied = $_POST['proxied'] == '1';
+                $proxied = $_POST['proxied'] == '1';
 
         try {
             $record = Capsule::table('mod_cloudflare_subdomain')
@@ -1651,6 +1690,14 @@ if($_POST['action'] == "toggle_cdn" && isset($_POST['subdomain_id'])) {
 
 // 处理单条记录的CDN代理开关
 if($_POST['action'] == "toggle_record_cdn" && isset($_POST['subdomain_id']) && isset($_POST['record_id'])) {
+    $subdomain_id = intval($_POST['subdomain_id']);
+    if (self::handleMaintenanceBlockForSubdomain($subdomain_id, $userid, $msg, $msg_type)) {
+        return [
+            'msg' => $msg,
+            'msg_type' => $msg_type,
+            'registerError' => $registerError,
+        ];
+    }
     if (!$disableDnsWrite && !$isUserBannedOrInactive && self::shouldUseAsyncDns('toggle_record_cdn', $module_settings, $isAsyncReplay)) {
         $jobId = self::enqueueAsyncDnsJob(intval($userid ?? 0), 'toggle_record_cdn');
         $msg = self::formatAsyncQueuedMessage($jobId);
@@ -1664,8 +1711,7 @@ if($_POST['action'] == "toggle_record_cdn" && isset($_POST['subdomain_id']) && i
             $msg_type = 'danger';
         }
 
-        $subdomain_id = intval($_POST['subdomain_id']);
-        $record_id = trim($_POST['record_id']);
+                $record_id = trim($_POST['record_id']);
         $proxied = $_POST['proxied'] == '1';
 
         try {
@@ -1724,6 +1770,14 @@ if($_POST['action'] == "toggle_record_cdn" && isset($_POST['subdomain_id']) && i
 
 // 处理DNS记录删除请求（仅删除某条记录）- 删除操作不检测VPN
 if($_POST['action'] == "delete_dns_record" && isset($_POST['record_id']) && isset($_POST['subdomain_id'])) {
+    $subdomain_id = intval($_POST['subdomain_id']);
+    if (self::handleMaintenanceBlockForSubdomain($subdomain_id, $userid, $msg, $msg_type, $registerError)) {
+        return [
+            'msg' => $msg,
+            'msg_type' => $msg_type,
+            'registerError' => $registerError,
+        ];
+    }
     if ($isUserBannedOrInactive) {
         $msg = self::actionText('dns.delete.banned', '您的账号已被封禁或停用，禁止删除DNS记录。') . ($banReasonText ? (' ' . $banReasonText) : '');
         $msg_type = 'danger';
@@ -1738,8 +1792,7 @@ if($_POST['action'] == "delete_dns_record" && isset($_POST['record_id']) && isse
         ];
     }
 
-    $subdomain_id = intval($_POST['subdomain_id']);
-    $record_id = trim($_POST['record_id']);
+        $record_id = trim($_POST['record_id']);
 
     try {
         $sub = Capsule::table('mod_cloudflare_subdomain')
@@ -1834,6 +1887,14 @@ if($_POST['action'] == "delete_dns_record" && isset($_POST['record_id']) && isse
 
 // 一键替换入整组 NS（域名委派）
 if($_POST['action'] == 'replace_ns_group' && isset($_POST['subdomain_id'])) {
+    $subdomain_id = intval($_POST['subdomain_id']);
+    if (self::handleMaintenanceBlockForSubdomain($subdomain_id, $userid, $msg, $msg_type, $registerError)) {
+        return [
+            'msg' => $msg,
+            'msg_type' => $msg_type,
+            'registerError' => $registerError,
+        ];
+    }
     if ($enableDnsUnlockFeature && !CfDnsUnlockService::userHasUnlocked($userid ?? 0)) {
         $msg = self::actionText('dns.unlock.required', '请先完成 DNS 解锁后再设置 DNS 服务器。');
         $msg_type = 'warning';
@@ -1883,8 +1944,7 @@ if($_POST['action'] == 'replace_ns_group' && isset($_POST['subdomain_id'])) {
             $msg = self::actionText('dns.ns.disabled', '已禁止设置 DNS 服务器（NS）。');
             $msg_type = 'warning';
         } else {
-            $subdomain_id = intval($_POST['subdomain_id']);
-            $lines = trim($_POST['ns_lines'] ?? '');
+                        $lines = trim($_POST['ns_lines'] ?? '');
             $forceReplace = isset($_POST['force_replace']) && $_POST['force_replace'] == '1';
 
             $preList = array_filter(
@@ -2091,6 +2151,77 @@ if($_POST['action'] == 'replace_ns_group' && isset($_POST['subdomain_id'])) {
             'msg_type' => $msg_type,
             'registerError' => $registerError,
         ];
+    }
+
+    private static function setRuntimeRootMaintenanceMap($map): void
+    {
+        self::$runtimeRootMaintenanceMap = [];
+        if (!is_array($map)) {
+            return;
+        }
+        foreach ($map as $domain => $flag) {
+            $normalized = strtolower(trim((string) $domain));
+            if ($normalized === '') {
+                continue;
+            }
+            self::$runtimeRootMaintenanceMap[$normalized] = (bool) $flag;
+        }
+    }
+
+    private static function lookupUserSubdomainRootdomain(int $subdomainId, int $userid): ?string
+    {
+        if ($subdomainId <= 0 || $userid <= 0) {
+            return null;
+        }
+        try {
+            $row = Capsule::table('mod_cloudflare_subdomain')
+                ->select('rootdomain')
+                ->where('id', $subdomainId)
+                ->where('userid', $userid)
+                ->first();
+            if ($row && isset($row->rootdomain)) {
+                return (string) $row->rootdomain;
+            }
+        } catch (\Throwable $e) {
+        }
+        return null;
+    }
+
+    private static function handleMaintenanceBlockForSubdomain(int $subdomainId, int $userid, ?string &$msg, ?string &$msg_type, ?string &$registerError = null): bool
+    {
+        $rootdomain = self::lookupUserSubdomainRootdomain($subdomainId, $userid);
+        if ($rootdomain !== null && self::isRootDomainUnderMaintenance($rootdomain)) {
+            $msg = self::maintenanceBlockedMessage($rootdomain);
+            $msg_type = 'warning';
+            if ($registerError !== null) {
+                $registerError = $msg;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static function isRootDomainUnderMaintenance(?string $rootdomain): bool
+    {
+        $normalized = strtolower(trim((string) $rootdomain));
+        if ($normalized === '') {
+            return false;
+        }
+        if (isset(self::$runtimeRootMaintenanceMap[$normalized])) {
+            return self::$runtimeRootMaintenanceMap[$normalized];
+        }
+        if (function_exists('cfmod_is_rootdomain_in_maintenance')) {
+            return cfmod_is_rootdomain_in_maintenance($normalized);
+        }
+        return false;
+    }
+
+    private static function maintenanceBlockedMessage(?string $rootdomain = null): string
+    {
+        if ($rootdomain !== null && $rootdomain !== '') {
+            return self::actionText('rootdomain.maintenance', '根域名 %s 当前维护中，请稍后再试。', [$rootdomain]);
+        }
+        return self::actionText('rootdomain.maintenance_generic', '该根域名当前维护中，请稍后再试。');
     }
 
     private static function enforceClientRateLimit(string $action, array $settings, int $userid): void

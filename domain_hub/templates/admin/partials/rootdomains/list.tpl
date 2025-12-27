@@ -8,6 +8,7 @@ $rootdomains = $rootdomainsView['rootdomains'] ?? [];
 $providerAccountMap = $rootdomainsView['providerAccountMap'] ?? [];
 $forbiddenDomains = $rootdomainsView['forbiddenDomains'] ?? [];
 $allKnownRootdomains = $rootdomainsView['allKnownRootdomains'] ?? [];
+$maintenanceSupported = $rootdomainsView['maintenanceSupported'] ?? false;
 $orderHeader = $lang['rootdomain_order_header'] ?? '排序';
 $orderHint = $lang['rootdomain_order_hint'] ?? '数值越小越靠前';
 $orderSaveLabel = $lang['rootdomain_order_save'] ?? '保存排序';
@@ -121,6 +122,9 @@ $orderSaveLabel = $lang['rootdomain_order_save'] ?? '保存排序';
                         <td><?php echo htmlspecialchars($rd->description ?? ''); ?></td>
                         <td>
                             <span class="badge bg-<?php echo $rd->status==='active'?'success':'secondary'; ?>"><?php echo $rd->status==='active'?'可注册':'已停止注册'; ?></span>
+                            <?php if ($maintenanceSupported && intval($rd->maintenance_mode ?? 0) === 1): ?>
+                                <span class="badge bg-warning text-dark ms-1"><i class="fas fa-tools me-1"></i>维护中</span>
+                            <?php endif; ?>
                         </td>
                         <td><?php echo date('Y-m-d H:i', strtotime($rd->created_at)); ?></td>
                         <td>
@@ -216,6 +220,16 @@ $orderSaveLabel = $lang['rootdomain_order_save'] ?? '保存排序';
                                     <input type="number" class="form-control" name="default_term_years" min="0" value="<?php echo $rdDefaultTerm; ?>">
                                     <div class="form-text">0 表示使用系统默认配置</div>
                                 </div>
+                                <?php if ($maintenanceSupported): ?>
+                                <div class="col-md-6">
+                                    <label class="form-label">维护模式</label>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="rootdomainMaintenance<?php echo $rd->id; ?>" name="maintenance_mode" value="1" <?php echo intval($rd->maintenance_mode ?? 0) === 1 ? 'checked' : ''; ?>>
+                                        <label class="form-check-label" for="rootdomainMaintenance<?php echo $rd->id; ?>">开启后将暂停该根域名的新注册及前端解析操作</label>
+                                    </div>
+                                    <div class="form-text text-muted">维护完成后取消勾选即可恢复</div>
+                                </div>
+                                <?php endif; ?>
                             </div>
                         </div>
                         <div class="modal-footer">
