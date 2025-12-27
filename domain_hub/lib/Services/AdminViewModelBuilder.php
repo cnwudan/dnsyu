@@ -187,6 +187,9 @@ $viewModel['dnsUnlockLogs'] = self::buildDnsUnlockLogs();
             'providerAccountMap' => $providers['accountMap'] ?? [],
             'forbiddenDomains' => [],
             'allKnownRootdomains' => [],
+            'maintenanceSupported' => function_exists('cfmod_rootdomain_maintenance_supported')
+                ? cfmod_rootdomain_maintenance_supported()
+                : false,
         ];
 
         try {

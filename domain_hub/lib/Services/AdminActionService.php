@@ -380,6 +380,7 @@ class CfAdminActionService
     private static function handleRootdomainAdd(): void
     {
         try {
+            self::ensureRootdomainMaintenanceColumn();
             $newDomain = strtolower(trim($_POST['domain'] ?? ''));
             $description = trim($_POST['description'] ?? '');
             $maxSubdomains = intval($_POST['max_subdomains'] ?? 1000);
@@ -424,6 +425,9 @@ class CfAdminActionService
             ]);
             if (function_exists('cfmod_clear_rootdomain_limits_cache')) {
                 cfmod_clear_rootdomain_limits_cache();
+            }
+            if (function_exists('cfmod_reset_rootdomain_maintenance_cache')) {
+                cfmod_reset_rootdomain_maintenance_cache();
             }
             if (function_exists('cloudflare_subdomain_log')) {
                 cloudflare_subdomain_log('admin_add_rootdomain', [
@@ -605,6 +609,7 @@ class CfAdminActionService
     private static function handleRootdomainUpdate(): void
     {
         try {
+            self::ensureRootdomainMaintenanceColumn();
             $rootId = intval($_POST['rootdomain_id'] ?? 0);
             if ($rootId <= 0) {
                 throw new Exception('参数无效');
@@ -633,6 +638,7 @@ class CfAdminActionService
             }
             $zoneIdInput = trim($_POST['cloudflare_zone_id'] ?? '');
             $descriptionInput = trim($_POST['description'] ?? '');
+            $maintenanceModeInput = isset($_POST['maintenance_mode']) && $_POST['maintenance_mode'] === '1';
             $updatePayload = [
                 'cloudflare_zone_id' => $zoneIdInput !== '' ? $zoneIdInput : null,
                 'description' => $descriptionInput !== '' ? $descriptionInput : null,
@@ -642,9 +648,15 @@ class CfAdminActionService
                 'provider_account_id' => $providerIdForUpdate,
                 'updated_at' => date('Y-m-d H:i:s'),
             ];
+            if (cfmod_rootdomain_maintenance_supported()) {
+                $updatePayload['maintenance_mode'] = $maintenanceModeInput ? 1 : 0;
+            }
             Capsule::table('mod_cloudflare_rootdomains')->where('id', $rootId)->update($updatePayload);
             if (function_exists('cfmod_clear_rootdomain_limits_cache')) {
                 cfmod_clear_rootdomain_limits_cache();
+            }
+            if (function_exists('cfmod_reset_rootdomain_maintenance_cache')) {
+                cfmod_reset_rootdomain_maintenance_cache();
             }
             $oldProviderId = intval($rootRow->provider_account_id ?? 0);
             if ($oldProviderId !== $providerIdForUpdate && function_exists('cfmod_reassign_subdomains_provider')) {
@@ -3175,6 +3187,24 @@ class CfAdminActionService
             }
         } catch (Exception $e) {
             // ignore migrations errors
+        }
+    }
+
+    private static function ensureRootdomainMaintenanceColumn(): void
+    {
+        static $ensured = false;
+        if ($ensured) {
+            return;
+        }
+        try {
+            if (!Capsule::schema()->hasColumn('mod_cloudflare_rootdomains', 'maintenance_mode')) {
+                Capsule::schema()->table('mod_cloudflare_rootdomains', function ($table) {
+                    $table->boolean('maintenance_mode')->default(0)->after('status');
+                });
+            }
+            $ensured = true;
+        } catch (\Throwable $e) {
+            $ensured = false;
         }
     }
 

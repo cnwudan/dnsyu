@@ -57,7 +57,8 @@
                     <?php $dnsUnlock = $dnsUnlock ?? []; ?>
                     <?php $dnsUnlockRequired = !empty($dnsUnlockRequired); ?>
                     <?php $dnsUnlockFeatureEnabled = !empty($dnsUnlockFeatureEnabled); ?>
-                    <?php if(count($existing) > 0): ?>
+                    <?php $rootMaintenanceMap = array_change_key_case($rootMaintenanceMap ?? [], CASE_LOWER); ?>
+<?php if(count($existing) > 0): ?>
                         <div class="table-responsive">
                             <table class="table table-striped table-hover">
                                 <thead class="table-dark">
@@ -91,6 +92,10 @@
                                     if ($redemptionDaysSetting < 0) { $redemptionDaysSetting = 0; }
                                     $redemptionSecondsSetting = $redemptionDaysSetting * 86400;
                                     foreach($existing as $e):
+                                        $rootKey = strtolower(trim((string)($e->rootdomain ?? '')));
+                                        $rootMaintenanceActive = !empty($rootMaintenanceMap[$rootKey] ?? false);
+                                        $rootMaintenanceMessage = cfclient_lang('cfclient.subdomains.maintenance.notice', '该根域名正在维护，暂不可进行解析、续期或删除操作。', [], true);
+                                        $rootMaintenanceAttr = $rootMaintenanceActive ? ' disabled title="' . htmlspecialchars($rootMaintenanceMessage, ENT_QUOTES) . '"' : '';
                                         $neverExpires = intval($e->never_expires ?? 0) === 1;
                                         $expiresRaw = $e->expires_at ?? null;
                                         $expiresTs = $expiresRaw ? strtotime($expiresRaw) : null;
@@ -170,8 +175,11 @@
                                             <?php if ($clientDeleteEnabled && $pendingDelete): ?>
                                                 <span class="badge bg-danger ms-2"><i class="fas fa-clock"></i> <?php echo cfclient_lang('cfclient.subdomains.delete.badge', '待删除', [], true); ?></span>
                                             <?php endif; ?>
-                                        </td>
-                                        <td><?php echo htmlspecialchars($e->rootdomain); ?></td>
+                                                                                    <?php if ($rootMaintenanceActive): ?>
+                                                <div class="text-warning small mt-2"><i class="fas fa-tools me-1"></i><?php echo htmlspecialchars($rootMaintenanceMessage); ?></div>
+                                            <?php endif; ?>
+</td>
+                                        <td><?php echo htmlspecialchars($e->rootdomain); ?><?php if ($rootMaintenanceActive): ?><span class="badge bg-warning text-dark ms-2"><i class="fas fa-tools me-1"></i><?php echo cfclient_lang('cfclient.subdomains.badge.maintenance', '维护中', [], true); ?></span><?php endif; ?></td>
                                         <td>
                                             <?php 
                                             // 检查是否有任何DNS记录（包括三级域名记录）
@@ -223,12 +231,12 @@
                                         <td>
                                             <div class="btn-group btn-group-sm">
                                                 <button type="button" class="btn btn-outline-primary" 
-                                                        onclick="showDnsForm(<?php echo $e->id; ?>, '<?php echo htmlspecialchars($e->subdomain); ?>', false)">
+                                                        onclick="showDnsForm(<?php echo $e->id; ?>, '<?php echo htmlspecialchars($e->subdomain); ?>', false)"<?php echo $rootMaintenanceAttr; ?>>
                                                     <i class="fas fa-plus"></i> <?php echo cfclient_lang('cfclient.subdomains.button.add_dns', '添加解析', [], true); ?>
                                                 </button>
                                                 <?php if(!$disableNsManagement): ?>
                                                 <button type="button" class="btn btn-outline-secondary" 
-                                                        onclick="showNsModal(<?php echo $e->id; ?>, '<?php echo htmlspecialchars($e->subdomain); ?>')">
+                                                        onclick="showNsModal(<?php echo $e->id; ?>, '<?php echo htmlspecialchars($e->subdomain); ?>')"<?php echo $rootMaintenanceAttr; ?>>
                                                     <i class="fas fa-server"></i> <?php echo cfclient_lang('cfclient.subdomains.button.ns', 'DNS服务器', [], true); ?>
                                                 </button>
                                                 <?php else: ?>
@@ -253,7 +261,7 @@
                                                     <input type="hidden" name="cfmod_csrf_token" value="<?php echo htmlspecialchars($_SESSION['cfmod_csrf'] ?? ''); ?>">
                                                     <input type="hidden" name="action" value="renew">
                                                     <input type="hidden" name="subdomain_id" value="<?php echo intval($e->id); ?>">
-                                                    <button type="submit" class="<?php echo $renewButtonClass; ?>">
+                                                    <button type="submit" class="<?php echo $renewButtonClass; ?>"><?php echo $rootMaintenanceAttr; ?>
                                                         <i class="fas fa-redo"></i> <?php echo $renewButtonText; ?>
                                                     </button>
                                                 </form>
@@ -342,12 +350,12 @@
                                                                         </td>
                                                                         <td>
                                                                             <div class="btn-group btn-group-sm">
-                                                                                <button type="button" class="btn btn-outline-primary" onclick="showDnsForm(<?php echo $e->id; ?>, '<?php echo htmlspecialchars($e->subdomain); ?>', true, '<?php echo htmlspecialchars($r->record_id); ?>', '<?php echo htmlspecialchars(str_replace('.' . $e->subdomain, '', $r->name) === $r->name ? '@' : str_replace('.' . $e->subdomain, '', $r->name)); ?>', '<?php echo htmlspecialchars($r->type); ?>', '<?php echo htmlspecialchars($r->content); ?>')"><?php echo cfclient_lang('cfclient.subdomains.details.button.edit', '编辑', [], true); ?></button>
+                                                                                <button type="button" class="btn btn-outline-primary" onclick="showDnsForm(<?php echo $e->id; ?>, '<?php echo htmlspecialchars($e->subdomain); ?>', true, '<?php echo htmlspecialchars($r->record_id); ?>', '<?php echo htmlspecialchars(str_replace('.' . $e->subdomain, '', $r->name) === $r->name ? '@' : str_replace('.' . $e->subdomain, '', $r->name)); ?>', '<?php echo htmlspecialchars($r->type); ?>', '<?php echo htmlspecialchars($r->content); ?>')"<?php echo $rootMaintenanceAttr; ?>><?php echo cfclient_lang('cfclient.subdomains.details.button.edit', '编辑', [], true); ?></button>
                                                                                 <form method="post" class="ms-1" onsubmit="return confirm('<?php echo cfclient_lang('cfclient.subdomains.confirm.delete_dns', '确定删除该DNS记录？', [], true); ?>');">
                                                                                     <input type="hidden" name="action" value="delete_dns_record">
                                                                                     <input type="hidden" name="subdomain_id" value="<?php echo $e->id; ?>">
                                                                                     <input type="hidden" name="record_id" value="<?php echo htmlspecialchars($r->record_id); ?>">
-                                                                                    <button type="submit" class="btn btn-outline-danger"><?php echo cfclient_lang('cfclient.subdomains.details.button.delete', '删除', [], true); ?></button>
+                                                                                    <button type="submit" class="btn btn-outline-danger"><?php echo $rootMaintenanceAttr; ?><?php echo cfclient_lang('cfclient.subdomains.details.button.delete', '删除', [], true); ?></button>
                                                                                 </form>
                                                                             </div>
                                                                         </td>
